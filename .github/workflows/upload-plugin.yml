@@ -1,0 +1,71 @@
+name: Upload plugin
+
+on:
+  issue_comment:
+    types:
+      - created
+      - edited
+
+jobs:
+  check-and-upload-plugin:
+    name: Check and upload plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.37.2
+
+      - name: Check plugin and valid accept
+        id: check
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const comment = context.payload.comment;
+
+            const description = issue.body;
+            if (description.includes('#request-upload-plugin')) {
+              const commentBody = comment.body.toLowerCase();
+              const commentAuthor = comment.user.login;
+              const repoOwner = context.repo.owner;
+              const repoName = context.repo.repo;
+
+              // Get repository collaborators
+              const collaborators = await github.rest.repos.listCollaborators({
+                owner: repoOwner,
+                repo: repoName,
+                per_page: 100,
+              });
+
+              // Check if the comment author is a collaborator with write access
+              const isCollaboratorWithWriteAccess = collaborators.data.some(collaborator => {
+                return collaborator.login === commentAuthor && collaborator.permissions.push;
+              });
+
+              if (commentBody.includes('accept') && isCollaboratorWithWriteAccess) {
+                console.log('Accepted issue:', issue.number);
+                return JSON.stringify({ id: issue.number, user: issue.user.login })
+              } else {
+                console.log('Issue not accepted:', issue.number);
+                return false
+              }
+            }
+            return false
+
+      - name: Setup env
+        run: |
+          echo '' > .env
+          echo 'GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}"' >> .env
+          echo 'OK_OWNER="mytom2trung"' >> .env
+          echo 'OK_REPO="services"' >> .env
+          echo 'OK_BRANCH="plugins"' >> .env
+
+      - name: Run scripts upload plugin
+        id: run
+        if: steps.check.outputs.result != 'false'
+        run: deno run --allow-read --allow-env --allow-net ./scripts/upload-plugin.ts ${{ steps.check.outputs.result }}
